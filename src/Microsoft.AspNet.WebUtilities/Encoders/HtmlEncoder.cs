@@ -5,6 +5,7 @@ using System;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Threading;
 
 namespace Microsoft.AspNet.WebUtilities.Encoders
 {
@@ -12,8 +13,14 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
     /// A class which can perform HTML encoding given an allow list of characters which
     /// can be represented unencoded.
     /// </summary>
-    public unsafe class HtmlEncoder
+    /// <remarks>
+    /// Once constructed, instances of this class are thread-safe for multiple callers.
+    /// </remarks>
+    public unsafe sealed class HtmlEncoder
     {
+        // The default HtmlEncoder (Basic Latin), instantiated on demand
+        private static HtmlEncoder _defaultEncoder;
+
         // A bitmap of characters which are allowed to be returned unescaped.
         private readonly uint[] _allowedCharsBitmap = new uint[0x10000 / 32];
 
@@ -66,6 +73,24 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
             }
         }
 
+        /// <summary>
+        /// A default instance of the HtmlEncoder, equivalent to allowing only
+        /// the 'Basic Latin' character range.
+        /// </summary>
+        public static HtmlEncoder Default
+        {
+            get
+            {
+                HtmlEncoder defaultEncoder = Volatile.Read(ref _defaultEncoder);
+                if (defaultEncoder == null)
+                {
+                    defaultEncoder = new HtmlEncoder();
+                    Volatile.Write(ref _defaultEncoder, defaultEncoder);
+                }
+                return defaultEncoder;
+            }
+        }
+
         // Marks a character as allowed (can be returned unencoded)
         private void AllowCharacter(char c)
         {
@@ -87,23 +112,23 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
         /// <summary>
         /// Everybody's favorite HtmlEncode routine.
         /// </summary>
-        public virtual string HtmlEncode(string input)
+        public string HtmlEncode(string value)
         {
-            if (String.IsNullOrEmpty(input))
+            if (String.IsNullOrEmpty(value))
             {
-                return input;
+                return value;
             }
 
             // Quick check: does the string need to be encoded at all?
             // If not, just return the input string as-is.
-            for (int i = 0; i < input.Length; i++)
+            for (int i = 0; i < value.Length; i++)
             {
-                if (!IsCharacterAllowed(input[i]))
+                if (!IsCharacterAllowed(value[i]))
                 {
-                    return HtmlEncodeImpl(input, i);
+                    return HtmlEncodeImpl(value, i);
                 }
             }
-            return input;
+            return value;
         }
 
         private string HtmlEncodeImpl(string input, int idxOfFirstCharWhichRequiresEncoding)
