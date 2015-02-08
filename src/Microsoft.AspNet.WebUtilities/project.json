@@ -3,7 +3,7 @@
     "description": "ASP.NET 5 common helper methods such as URL encoding.",
     "compilationOptions": {
         "allowUnsafe": true
-      },
+    },
     "dependencies": {
     },
     "frameworks": {
