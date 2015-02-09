@@ -10,7 +10,10 @@ using System.Threading;
 
 namespace Microsoft.AspNet.WebUtilities.Encoders
 {
-    public static class UnicodeFilters
+    /// <summary>
+    /// Contains predefined Unicode code point filters.
+    /// </summary>
+    public static class CodePointFilters
     {
         /// <summary>
         /// A filter which allows no characters.

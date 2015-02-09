@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
+using System.Text;
 using Xunit;
 
 namespace Microsoft.AspNet.WebUtilities.Encoders
@@ -13,6 +14,8 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
     public unsafe class UnicodeHelpersTests
     {
         private const int UnicodeReplacementChar = '\uFFFD';
+
+        private static readonly UTF8Encoding _utf8EncodingThrowOnInvalidBytes = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
         [Fact]
         public void GetDefinedCharacterBitmap_ReturnsSingletonInstance()
@@ -39,6 +42,32 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
             fixed (char* pInput = input)
             {
                 Assert.Equal(expectedResult, UnicodeHelpers.GetScalarValueFromUtf16(pInput, endOfString: (input.Length == 1)));
+            }
+        }
+
+        [Fact]
+        public void GetUtf8RepresentationForScalarValue()
+        {
+            for (int i = 0; i <= 0x10FFFF; i++)
+            {
+                if (i <= 0xFFFF && Char.IsSurrogate((char)i))
+                {
+                    continue; // no surrogates
+                }
+
+                // Arrange
+                byte[] expectedUtf8Bytes = _utf8EncodingThrowOnInvalidBytes.GetBytes(Char.ConvertFromUtf32(i));
+
+                // Act
+                List<byte> actualUtf8Bytes = new List<byte>(4);
+                uint asUtf8 = (uint)UnicodeHelpers.GetUtf8RepresentationForScalarValue((uint)i);
+                do
+                {
+                    actualUtf8Bytes.Add((byte)asUtf8);
+                } while ((asUtf8 >>= 8) != 0);
+
+                // Assert
+                Assert.Equal(expectedUtf8Bytes, actualUtf8Bytes);
             }
         }
 

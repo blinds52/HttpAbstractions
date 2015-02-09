@@ -18,7 +18,12 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
         /// Used for invalid Unicode sequences or other unrepresentable values.
         /// </summary>
         private const char UNICODE_REPLACEMENT_CHAR = '\uFFFD';
-        
+
+        /// <summary>
+        /// The last code point defined by the Unicode specification.
+        /// </summary>
+        internal const int UNICODE_LAST_CODEPOINT = 0x10FFFF;
+
         private static uint[] _definedCharacterBitmap;
 
         /// <summary>
@@ -37,7 +42,7 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
 
             // Read everything in as raw bytes.
             byte[] rawData = new byte[8 * 1024];
-            for (int numBytesReadTotal = 0; numBytesReadTotal < rawData.Length; )
+            for (int numBytesReadTotal = 0; numBytesReadTotal < rawData.Length;)
             {
                 int numBytesReadThisIteration = stream.Read(rawData, numBytesReadTotal, rawData.Length - numBytesReadTotal);
                 if (numBytesReadThisIteration == 0)
@@ -135,7 +140,66 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
             // handling shows up on the hot path, and our caller has already sanitized the inputs.
             return (lowSurrogate & 0x3ff) | (((highSurrogate & 0x3ff) + (1 << 6)) << 10);
         }
-        
+
+        internal static void GetUtf16SurrogatePairFromAstralScalarValue(int scalar, out char highSurrogate, out char lowSurrogate)
+        {
+            Debug.Assert(0x10000 <= scalar && scalar <= UNICODE_LAST_CODEPOINT);
+
+            // See http://www.unicode.org/versions/Unicode6.2.0/ch03.pdf, Table 3.5 for the
+            // details of this conversion. We don't use Char.ConvertFromUtf32 because its exception
+            // handling shows up on the hot path, it allocates temporary strings (which we don't want),
+            // and our caller has already sanitized the inputs.
+
+            int x = scalar & 0xFFFF;
+            int u = scalar >> 16;
+            int w = u - 1;
+            highSurrogate = (char)(0xD800 | (w << 6) | (x >> 10));
+            lowSurrogate = (char)(0xDC00 | (x & 0x3FF));
+        }
+
+        /// <summary>
+        /// Given a Unicode scalar value, returns the UTF-8 representation of the value.
+        /// The return value's bytes should be popped from the LSB.
+        /// </summary>
+        internal static int GetUtf8RepresentationForScalarValue(uint scalar)
+        {
+            Debug.Assert(scalar <= UNICODE_LAST_CODEPOINT);
+
+            // See http://www.unicode.org/versions/Unicode6.2.0/ch03.pdf, Table 3.6 for the
+            // details of this conversion. We don't use UTF8Encoding since we're encoding
+            // a scalar code point, not a UTF16 character sequence.
+            if (scalar <= 0x7f)
+            {
+                // one byte used: scalar 00000000 0xxxxxxx -> byte sequence 0xxxxxxx
+                byte firstByte = (byte)scalar;
+                return firstByte;
+            }
+            else if (scalar <= 0x7ff)
+            {
+                // two bytes used: scalar 00000yyy yyxxxxxx -> byte sequence 110yyyyy 10xxxxxx
+                byte firstByte = (byte)(0xc0 | (scalar >> 6));
+                byte secondByteByte = (byte)(0x80 | (scalar & 0x3f));
+                return ((secondByteByte << 8) | firstByte);
+            }
+            else if (scalar <= 0xffff)
+            {
+                // three bytes used: scalar zzzzyyyy yyxxxxxx -> byte sequence 1110zzzz 10yyyyyy 10xxxxxx
+                byte firstByte = (byte)(0xe0 | (scalar >> 12));
+                byte secondByte = (byte)(0x80 | ((scalar >> 6) & 0x3f));
+                byte thirdByte = (byte)(0x80 | (scalar & 0x3f));
+                return ((((thirdByte << 8) | secondByte) << 8) | firstByte);
+            }
+            else
+            {
+                // four bytes used: scalar 000uuuuu zzzzyyyy yyxxxxxx -> byte sequence 11110uuu 10uuzzzz 10yyyyyy 10xxxxxx
+                byte firstByte = (byte)(0xf0 | (scalar >> 18));
+                byte secondByte = (byte)(0x80 | ((scalar >> 12) & 0x3f));
+                byte thirdByte = (byte)(0x80 | ((scalar >> 6) & 0x3f));
+                byte fourthByte = (byte)(0x80 | (scalar & 0x3f));
+                return ((((((fourthByte << 8) | thirdByte) << 8) | secondByte) << 8) | firstByte);
+            }
+        }
+
         /// <summary>
         /// Returns a value stating whether a character is defined per version 7.0.0
         /// of the Unicode specification. Certain classes of characters (control chars,

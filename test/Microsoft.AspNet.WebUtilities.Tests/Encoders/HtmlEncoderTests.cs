@@ -2,7 +2,6 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
-using System.Collections.Generic;
 using System.Globalization;
 using Xunit;
 
@@ -44,7 +43,7 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
         public void Ctor_WithMultipleParameters_AllowsBitwiseOrOfCodePoints()
         {
             // Arrange
-            HtmlEncoder encoder = new HtmlEncoder(UnicodeFilters.Latin1Supplement, UnicodeFilters.MiscellaneousSymbols);
+            HtmlEncoder encoder = new HtmlEncoder(CodePointFilters.Latin1Supplement, CodePointFilters.MiscellaneousSymbols);
 
             // Act & assert
             Assert.Equal("&#x61;", encoder.HtmlEncode("a"));
@@ -68,7 +67,7 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
         public void Default_EquivalentToBasicLatin()
         {
             // Arrange
-            HtmlEncoder controlEncoder = new HtmlEncoder(UnicodeFilters.BasicLatin);
+            HtmlEncoder controlEncoder = new HtmlEncoder(CodePointFilters.BasicLatin);
             HtmlEncoder testEncoder = HtmlEncoder.Default;
 
             // Act & assert
@@ -97,7 +96,7 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
         public void HtmlEncode_AllRangesAllowed_StillEncodesForbiddenChars_Simple()
         {
             // Arrange
-            HtmlEncoder encoder = new HtmlEncoder(UnicodeFilters.All);
+            HtmlEncoder encoder = new HtmlEncoder(CodePointFilters.All);
             const string input = "Hello <>&\'\"+ there!";
             const string expected = "Hello &lt;&gt;&amp;&#x27;&quot;&#x2B; there!";
 
@@ -109,7 +108,7 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
         public void HtmlEncode_AllRangesAllowed_StillEncodesForbiddenChars_Extended()
         {
             // Arrange
-            HtmlEncoder encoder = new HtmlEncoder(UnicodeFilters.All);
+            HtmlEncoder encoder = new HtmlEncoder(CodePointFilters.All);
 
             // Act & assert - BMP chars
             for (int i = 0; i <= 0xFFFF; i++)
@@ -165,16 +164,13 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
                 string retVal = encoder.HtmlEncode(input);
                 Assert.Equal(expected, retVal);
             }
-
-
-            // Assert
         }
 
         [Fact]
         public void HtmlEncode_BadSurrogates_ReturnsUnicodeReplacementChar()
         {
             // Arrange
-            HtmlEncoder encoder = new HtmlEncoder(UnicodeFilters.All); // allow all codepoints
+            HtmlEncoder encoder = new HtmlEncoder(CodePointFilters.All); // allow all codepoints
 
             // "a<unpaired leading>b<unpaired trailing>c<trailing before leading>d<unpaired trailing><valid>e<high at end of string>"
             const string input = "a\uD800b\uDFFFc\uDFFF\uD800d\uDFFF\uD800\uDFFFe\uD800";
@@ -219,38 +215,6 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
         }
 
         [Fact]
-        public void HtmlEncode_ProducesNumericEntities()
-        {
-            HtmlEncoder encoder = new HtmlEncoder(UnicodeFilters.None); // disallow all codepoints
-            for (int i = 0; i <= 0x10FFFF /* last Unicode code point */; i++)
-            {
-                if (!IsSurrogateCodePoint(i))
-                {
-                    HtmlEncode_ProducesNumericEntitiesImpl(encoder, i);
-                }
-            }
-        }
-
-        public void HtmlEncode_ProducesNumericEntitiesImpl(HtmlEncoder encoder, int codePoint)
-        {
-            // Arrange
-            string input = Char.ConvertFromUtf32(codePoint);
-            string expected = String.Format(CultureInfo.InvariantCulture, "&#x{0:X};", codePoint);
-
-            // special-case certain HTML entities
-            if (codePoint == (int)'<') { expected = "&lt;"; }
-            else if (codePoint == (int)'>') { expected = "&gt;"; }
-            else if (codePoint == (int)'&') { expected = "&amp;"; }
-            else if (codePoint == (int)'\"') { expected = "&quot;"; }
-
-            // Act
-            string retVal = encoder.HtmlEncode(input);
-
-            // Assert
-            Assert.Equal(expected, retVal);
-        }
-
-        [Fact]
         public void HtmlEncode_WithCharsRequiringEncodingAtBeginning()
         {
             Assert.Equal("&amp;Hello, there!", new HtmlEncoder().HtmlEncode("&Hello, there!"));
@@ -277,21 +241,6 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
         private static bool IsSurrogateCodePoint(int codePoint)
         {
             return (0xD800 <= codePoint && codePoint <= 0xDFFF);
-        }
-
-        private sealed class CustomCodePointFilter : ICodePointFilter
-        {
-            private readonly int[] _allowedCodePoints;
-
-            public CustomCodePointFilter(params int[] allowedCodePoints)
-            {
-                _allowedCodePoints = allowedCodePoints;
-            }
-
-            public IEnumerable<int> GetAllowedCodePoints()
-            {
-                return _allowedCodePoints;
-            }
         }
     }
 }

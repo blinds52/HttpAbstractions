@@ -14,6 +14,10 @@
     },
     "frameworks": {
         "aspnet50": { },
-        "aspnetcore50": { }
+        "aspnetcore50": {
+            "dependencies": {
+                "System.Text.Encoding.Extensions": "4.0.10-beta-*"
+            }
+        }
     }
 }

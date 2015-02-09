@@ -5,57 +5,45 @@ using System;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
-using System.Threading;
 
 namespace Microsoft.AspNet.WebUtilities.Encoders
 {
-    /// <summary>
-    /// A class which can perform HTML encoding given an allow list of characters which
-    /// can be represented unencoded.
-    /// </summary>
-    /// <remarks>
-    /// Once constructed, instances of this class are thread-safe for multiple callers.
-    /// </remarks>
-    public unsafe sealed class HtmlEncoder
+    internal unsafe abstract class UnicodeEncoderBase
     {
-        // The default HtmlEncoder (Basic Latin), instantiated on demand
-        private static HtmlEncoder _defaultEncoder;
-
         // A bitmap of characters which are allowed to be returned unescaped.
         private readonly uint[] _allowedCharsBitmap = new uint[0x10000 / 32];
 
-        /// <summary>
-        /// Instantiates an encoder using the 'Basic Latin' code table as the allow list.
-        /// </summary>
-        public HtmlEncoder()
-            : this(CodePointFilters.BasicLatin)
-        {
-        }
+        // The worst-case number of output chars generated for any input char.
+        private readonly int _maxOutputCharsPerInputChar;
 
         /// <summary>
         /// Instantiates an encoder using a custom allow list of characters.
         /// </summary>
-        public HtmlEncoder(params ICodePointFilter[] filters)
+        protected UnicodeEncoderBase(ICodePointFilter[] filters, int maxOutputCharsPerInputChar)
         {
-            if (filters == null)
-            {
-                return; // no characters are allowed, just no-op immediately
-            }
+            _maxOutputCharsPerInputChar = maxOutputCharsPerInputChar;
 
-            // Punch a hole for each allowed code point across all filters (this is an OR).
-            // We don't allow supplementary (astral) characters for now.
-            foreach (var filter in filters)
+            if (filters != null)
             {
-                foreach (var codePoint in filter.GetAllowedCodePoints())
+                // Punch a hole for each allowed code point across all filters (this is an OR).
+                // We don't allow supplementary (astral) characters for now.
+                foreach (var filter in filters)
                 {
-                    if (!UnicodeHelpers.IsSupplementaryCodePoint(codePoint))
+                    foreach (var codePoint in filter.GetAllowedCodePoints())
                     {
-                        AllowCharacter((char)codePoint);
+                        if (!UnicodeHelpers.IsSupplementaryCodePoint(codePoint))
+                        {
+                            AllowCharacter((char)codePoint);
+                        }
                     }
                 }
             }
 
-            // Forbid characters that are special in HTML
+            // Forbid characters that are special in HTML.
+            // Even though this is a common encoder used by everybody (including URL
+            // and JavaScript strings), it's unfortunately common for developers to
+            // forget to HTML-encode a string once it has been URL-encoded or
+            // JavaScript string-escaped, so this offers extra protection.
             ForbidCharacter('<');
             ForbidCharacter('>');
             ForbidCharacter('&');
@@ -73,24 +61,6 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
             }
         }
 
-        /// <summary>
-        /// A default instance of the HtmlEncoder, equivalent to allowing only
-        /// the 'Basic Latin' character range.
-        /// </summary>
-        public static HtmlEncoder Default
-        {
-            get
-            {
-                HtmlEncoder defaultEncoder = Volatile.Read(ref _defaultEncoder);
-                if (defaultEncoder == null)
-                {
-                    defaultEncoder = new HtmlEncoder();
-                    Volatile.Write(ref _defaultEncoder, defaultEncoder);
-                }
-                return defaultEncoder;
-            }
-        }
-
         // Marks a character as allowed (can be returned unencoded)
         private void AllowCharacter(char c)
         {
@@ -101,7 +71,7 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
         }
 
         // Marks a character as forbidden (must be returned encoded)
-        private void ForbidCharacter(char c)
+        protected void ForbidCharacter(char c)
         {
             uint codePoint = (uint)c;
             int index = (int)(codePoint >> 5);
@@ -110,9 +80,9 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
         }
 
         /// <summary>
-        /// Everybody's favorite HtmlEncode routine.
+        /// Entry point to the encoder.
         /// </summary>
-        public string HtmlEncode(string value)
+        public string Encode(string value)
         {
             if (String.IsNullOrEmpty(value))
             {
@@ -125,13 +95,13 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
             {
                 if (!IsCharacterAllowed(value[i]))
                 {
-                    return HtmlEncodeImpl(value, i);
+                    return EncodeCore(value, i);
                 }
             }
             return value;
         }
 
-        private string HtmlEncodeImpl(string input, int idxOfFirstCharWhichRequiresEncoding)
+        private string EncodeCore(string input, int idxOfFirstCharWhichRequiresEncoding)
         {
             Debug.Assert(idxOfFirstCharWhichRequiresEncoding >= 0);
             Debug.Assert(idxOfFirstCharWhichRequiresEncoding < input.Length);
@@ -148,11 +118,11 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
             StringBuilder builder = new StringBuilder(input, 0, idxOfFirstCharWhichRequiresEncoding, sbCapacity);
             fixed (char* pInput = input)
             {
-                return HtmlEncodeImpl2(builder, &pInput[idxOfFirstCharWhichRequiresEncoding], (uint)numCharsWhichMayRequireEncoding);
+                return EncodeCore2(builder, &pInput[idxOfFirstCharWhichRequiresEncoding], (uint)numCharsWhichMayRequireEncoding);
             }
         }
 
-        private string HtmlEncodeImpl2(StringBuilder builder, char* input, uint charsRemaining)
+        private string EncodeCore2(StringBuilder builder, char* input, uint charsRemaining)
         {
             while (charsRemaining != 0)
             {
@@ -160,7 +130,7 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
                 if (UnicodeHelpers.IsSupplementaryCodePoint(nextScalar))
                 {
                     // Supplementary characters should always be encoded numerically.
-                    WriteScalarAsHtmlEncodedEntity(builder, (uint)nextScalar);
+                    WriteEncodedScalar(builder, (uint)nextScalar);
 
                     // We consume two UTF-16 characters for a single supplementary character.
                     input += 2;
@@ -178,11 +148,7 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
                     }
                     else
                     {
-                        if (c == '<') { builder.Append("&lt;"); }
-                        else if (c == '>') { builder.Append("&gt;"); }
-                        else if (c == '&') { builder.Append("&amp;"); }
-                        else if (c == '\"') { builder.Append("&quot;"); }
-                        else { WriteScalarAsHtmlEncodedEntity(builder, (uint)nextScalar); }
+                        WriteEncodedScalar(builder, (uint)nextScalar);
                     }
                 }
             }
@@ -200,30 +166,6 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
             return ((_allowedCharsBitmap[index] >> offset) & 0x1U) != 0;
         }
 
-        // Writes a scalar value as "&#xFFFFFFFF;"
-        private static void WriteScalarAsHtmlEncodedEntity(StringBuilder builder, uint value)
-        {
-            // We're building the characters up in reverse
-            char* chars = stackalloc char[8 /* "FFFFFFFF" */];
-            int numCharsWritten = 0;
-            do
-            {
-                Debug.Assert(numCharsWritten < 8, "Couldn't have written 8 characters out by this point.");
-                // Pop off the last nibble
-                chars[numCharsWritten++] = HexUtil.IntToChar(value & 0xFU);
-                value >>= 4;
-            } while (value != 0);
-
-            // Finally, write out the HTML-encoded scalar value.
-            builder.Append('&');
-            builder.Append('#');
-            builder.Append('x');
-            Debug.Assert(numCharsWritten > 0, "At least one character should've been written.");
-            do
-            {
-                builder.Append(chars[--numCharsWritten]);
-            } while (numCharsWritten != 0);
-            builder.Append(';');
-        }
+        protected abstract void WriteEncodedScalar(StringBuilder builder, uint value);
     }
 }
