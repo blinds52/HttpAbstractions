@@ -92,16 +92,30 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
             Assert.Same(encoder1, encoder2);
         }
 
-        [Fact]
-        public void JavaScriptStringEncode_AllRangesAllowed_StillEncodesForbiddenChars_Simple()
+        [Theory]
+        [InlineData("<", @"\u003C")]
+        [InlineData(">", @"\u003E")]
+        [InlineData("&", @"\u0026")]
+        [InlineData("'", @"\u0027")]
+        [InlineData("\"", @"\u0022")]
+        [InlineData("+", @"\u002B")]
+        [InlineData("\\", @"\\")]
+        [InlineData("/", @"\/")]
+        [InlineData("\b", @"\b")]
+        [InlineData("\f", @"\f")]
+        [InlineData("\n", @"\n")]
+        [InlineData("\t", @"\t")]
+        [InlineData("\r", @"\r")]
+        public void JavaScriptStringEncode_AllRangesAllowed_StillEncodesForbiddenChars_Simple(string input, string expected)
         {
             // Arrange
             JavaScriptStringEncoder encoder = new JavaScriptStringEncoder(CodePointFilters.All);
-            const string input = "Hello <>&\'\"+/\\\b\f\n\r\t there!";
-            const string expected = @"Hello \u003C\u003E\u0026\u0027\u0022\u002B\/\\\b\f\n\r\t there!";
 
-            // Act & assert
-            Assert.Equal(expected, encoder.JavaScriptStringEncode(input));
+            // Act
+            string retVal = encoder.JavaScriptStringEncode(input);
+
+            // Assert
+            Assert.Equal(expected, retVal);
         }
 
         [Fact]

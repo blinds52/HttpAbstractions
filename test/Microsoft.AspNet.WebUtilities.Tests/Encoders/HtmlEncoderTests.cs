@@ -92,16 +92,23 @@ namespace Microsoft.AspNet.WebUtilities.Encoders
             Assert.Same(encoder1, encoder2);
         }
 
-        [Fact]
-        public void HtmlEncode_AllRangesAllowed_StillEncodesForbiddenChars_Simple()
+        [Theory]
+        [InlineData("<", "&lt;")]
+        [InlineData(">", "&gt;")]
+        [InlineData("&", "&amp;")]
+        [InlineData("'", "&#x27;")]
+        [InlineData("\"", "&quot;")]
+        [InlineData("+", "&#x2B;")]
+        public void HtmlEncode_AllRangesAllowed_StillEncodesForbiddenChars_Simple(string input, string expected)
         {
             // Arrange
             HtmlEncoder encoder = new HtmlEncoder(CodePointFilters.All);
-            const string input = "Hello <>&\'\"+ there!";
-            const string expected = "Hello &lt;&gt;&amp;&#x27;&quot;&#x2B; there!";
 
-            // Act & assert
-            Assert.Equal(expected, encoder.HtmlEncode(input));
+            // Act
+            string retVal = encoder.HtmlEncode(input);
+
+            // Assert
+            Assert.Equal(expected, retVal);
         }
 
         [Fact]
